@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/minitest/impact"
+require_relative "../lib/minitest/impact/cli"
+
+exit Minitest::Impact::CLI.start(ARGV.dup)
