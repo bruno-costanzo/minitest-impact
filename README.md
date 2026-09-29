@@ -63,8 +63,13 @@ nothing changes in your test helper. Each test process (Rails' forked parallel w
 appends one JSON line per test to its own file; when the command ends they are merged into
 `tmp/minitest-impact/map.json` (`--map PATH` to change it), stamped with the commit it describes.
 
-- **Turn SimpleCov off while recording** (`SimpleCov.start unless ENV["MINITEST_IMPACT_RECORD"]`,
-  or your app's own switch). Ruby allows one coverage setup per process.
+- **SimpleCov is off while recording.** Ruby allows one coverage setup per process, so the
+  recorder makes `SimpleCov.start` do nothing for the run, with no change to your test helper.
+  Another tool that calls `Coverage.start` itself has to be turned off by you
+  (`ENV["MINITEST_IMPACT_RECORD"]` is set while recording).
+- **It does not need to be in your Gemfile.** The recorder loads no gem before your app's bundle
+  does, so the CLI can run from a checkout of this repository, outside the app's bundle:
+  `ruby -I path/to/minitest-impact/lib path/to/minitest-impact/exe/minitest-impact record -- bin/rails test`.
 - Recording is 2 to 3 times slower than a normal run on a Rails app, because every test reads
   and clears the coverage counters. Record on a quiet machine, or in CI, and refresh the map
   when it drifts: a map a few hundred commits old still works, because methods are matched by name.

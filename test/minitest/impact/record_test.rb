@@ -67,6 +67,49 @@ class RecordTest < Minitest::Test
     recorder.instance_variable_set(:@root, root)
   end
 
+  # Loaded before Bundler, a default gem such as json would be activated at whatever version is
+  # newest, and an app whose lockfile pins another one would refuse to boot.
+  def test_the_recorder_activates_no_gem_before_the_application_boots
+    lib = File.expand_path("../../../lib", __dir__)
+    bootstrap = File.join(lib, "minitest/impact/record_bootstrap.rb")
+    outside_this_bundle = ENV.keys.grep(/\A(BUNDLE|RUBYLIB\z)/).to_h { |key| [key, nil] }
+    loaded = lambda do |rubyopt|
+      env = outside_this_bundle.merge("MINITEST_IMPACT_RECORD" => Dir.mktmpdir, "RUBYOPT" => rubyopt)
+      out, status = Open3.capture2(env, "ruby", "-e", "puts Gem.loaded_specs.keys.sort.inspect")
+      assert status.success?
+      out.strip
+    end
+
+    assert_equal loaded.call(""), loaded.call("-I#{lib} -r#{bootstrap}")
+  end
+
+  # An app that starts SimpleCov unconditionally cannot share Coverage with the recorder, and whoever
+  # records its map may not be allowed to edit its test helper; so SimpleCov stays off while recording.
+  def test_simplecov_is_switched_off_while_recording
+    sandbox.write("test/covered_test.rb", <<~RUBY)
+      module SimpleCov
+        def self.start(*) = Coverage.start(lines: true)
+      end
+      SimpleCov.start
+
+      require "minitest/autorun"
+      require_relative "../lib/calc"
+
+      class CoveredTest < Minitest::Test
+        def test_add = assert_equal(3, Calc.new.add(1, 2))
+      end
+    RUBY
+    sandbox.commit("simplecov")
+
+    status = Dir.chdir(sandbox.root) do
+      Minitest::Impact::CLI.start(["record", "--", "ruby", "test/covered_test.rb"], out: StringIO.new, err: StringIO.new)
+    end
+
+    assert_equal 0, status
+    map = Minitest::Impact::Map.load(File.join(sandbox.root, Minitest::Impact::Map::DEFAULT_PATH))
+    assert_equal [3], map.tests["test/covered_test.rb"].files["lib/calc.rb"]
+  end
+
   def test_record_without_a_command_or_tests_fails
     err = StringIO.new
     assert_equal 1, Dir.chdir(sandbox.root) { Minitest::Impact::CLI.start(["record"], out: StringIO.new, err: err) }

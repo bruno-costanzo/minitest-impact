@@ -1,12 +1,14 @@
 # frozen_string_literal: true
 
 require "coverage"
-require "json"
 
 module Minitest
   module Impact
     # Records which project lines each test executes. Loaded through RUBYOPT before the
-    # application boots (see `minitest-impact record`), so it depends on the standard library only.
+    # application boots (see `minitest-impact record`), so it depends on the standard library only,
+    # and loads no gem there: json, a default gem, would be activated at its newest installed version
+    # and the app's bundle would then refuse to boot on any other. It is required at the first write,
+    # after the bundle chose its version.
     #
     # Each test appends one JSON line to a file named after its process, so forked parallel
     # workers never share a file handle; `Map.merge` folds the parts into one map afterwards.
@@ -94,6 +96,7 @@ module Minitest
         end
 
         def write(record)
+          require "json"
           File.open(File.join(dir, PARTS, "#{Process.pid}.ndjson"), "a") do |file|
             file.puts(JSON.generate(record))
           end
