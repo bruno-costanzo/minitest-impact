@@ -16,7 +16,7 @@ Confidence: medium
   ...
 ```
 
-It works in two layers:
+It works in three layers; the third is optional:
 
 1. **A coverage map, exact and free.** One recording run of your suite notes which project lines
    every test file executed (Ruby's `Coverage`, with `eval: true` so ERB views count too). Given a
@@ -65,8 +65,8 @@ appends one JSON line per test to its own file; when the command ends they are m
 
 - **Turn SimpleCov off while recording** (`SimpleCov.start unless ENV["MINITEST_IMPACT_RECORD"]`,
   or your app's own switch). Ruby allows one coverage setup per process.
-- Recording is slower than a normal run (about 2 to 3 times on a Rails app), because every test
-  reads and clears the coverage counters. Record on a quiet machine, or in CI, and refresh the map
+- Recording is 2 to 3 times slower than a normal run on a Rails app, because every test reads
+  and clears the coverage counters. Record on a quiet machine, or in CI, and refresh the map
   when it drifts: a map a few hundred commits old still works, because methods are matched by name.
 - Record from a clean working tree; the map is stamped with `HEAD`.
 
@@ -89,30 +89,34 @@ likely files.
 
 Put this in the agent's instructions (`CLAUDE.md`, `AGENTS.md`):
 
-> While you work, run `bin/rails test:impact SINCE=main` instead of the whole suite. When it says
-> "Confidence: low", or when you are done, the full gate runs; you do not run it yourself.
+> While you work, run `bin/rails test:impact SINCE=main` instead of the whole suite. Do not run
+> the whole suite yourself: it runs after you finish.
 
-and run the full gate as code after the agent says it is done, feeding back only failures.
+Then make that true in your harness: run the full suite as code once the agent says it is done,
+and feed back only the failures. On "Confidence: low", `test:impact` already runs the whole suite.
 
 ## Jev
 
-[Jev](https://docs.typesafe.ai) is TypeSafe's System One model: a fast, cheap classifier that
-answers typed questions (yes/no, choice, score) about a state, with calibrated probabilities. It
-is used here the way TypeSafe's own guidance says to use it:
+[Jev](https://docs.typesafe.ai) is TypeSafe's fast, cheap classifier: it answers typed questions
+(yes/no, choice, score) about a state, with calibrated probabilities.
 
-- **Rules stay in code.** Jev never decides what a test file is, which files need the whole suite,
+This layer is **not measured yet**: the numbers below were taken without it, and its thresholds
+ship untuned (see [Tuning](#tuning)). Treat it as experimental until you have measured it on your
+own history.
+
+- Rules stay in code. Jev never decides what a test file is, which files need the whole suite,
   or anything else a path can tell.
-- **One narrow question per judgment, all in one request.** The state is the change (paths, a
+- One request per selection, one narrow question per judgment. The state is the change (paths, a
   trimmed diff, your `--intent`) and up to 48 candidate test files with their test names. The
   questions: one yes/no per candidate ("do these tests call, render or assert on something the
-  change modifies?"), one choice of the candidate most directly written for the change, **with a
-  "none" option**, and one yes/no for "does every test depend on this?".
-- **Fast search first, then re-rank**, as in TypeSafe's re-ranking cookbook: the candidates are
-  the map's selection plus test files whose paths and test names share words with the change.
-- **Exact map hits are never dropped.** Jev can add tests, drop weak non-exact ones and reorder,
-  but a test the map saw run the changed method stays.
-- **Thresholds live in one file** (`lib/minitest/impact/jev/questions.rb`) and **the model version
-  is pinned** (`jev-1.13.0`), because a threshold tuned on one version does not carry over.
+  change modifies?"), one choice of the candidate most directly written for the change, with a
+  "none" option, and one yes/no for "does every test depend on this?".
+- The candidates come from a fast search, and Jev only re-ranks them: the map's selection plus
+  test files whose paths and test names share words with the change.
+- Exact map hits are never dropped. Jev can add tests, drop weak non-exact ones and reorder, but a
+  test the map saw run the changed method stays.
+- The thresholds live in one file (`lib/minitest/impact/jev/questions.rb`) and the model version
+  is pinned (`jev-1.13.0`), because a threshold tuned on one version does not carry over.
 
 Set `TYPESAFE_API_KEY` to turn it on (`TYPESAFE_BASE_URL` for another endpoint,
 `MINITEST_IMPACT_JEV_MODEL` to move the pin). Without a key, or with `--no-jev`, everything runs
@@ -153,24 +157,24 @@ Two kinds of labelled cases:
 Reported per case and on average: whether any expected test was selected (`caught`), whether all
 were (`all_caught`), recall, precision, and the share of the suite selected.
 
-### First numbers: Piou Piou, map only (2026-09-28)
+### First numbers: one Rails app, map only (2026-09-28)
 
-The map was recorded at one commit: 396 test files (2,673 unit and 88 system tests), 580 KB of
-JSON (72 KB gzipped). Recording made the unit suite about 2 to 3 times slower. The evaluation made
-no Jev calls.
+Measured on Piou Piou, a Rails 8.1 app, with the map recorded at one commit: 396 test files (2,673
+unit and 88 system tests), 580 KB of JSON (72 KB gzipped). The evaluation made no Jev calls.
 
 | Cases | Caught (any expected test selected) | All caught | Recall | Precision | Share of suite selected | Share of suite time |
 |---|---:|---:|---:|---:|---:|---:|
 | 150 commits that changed code and tests together, method-level | 94.0% | 90.7% | 0.93 | 0.17 | 12.1% | 24.0% |
 | The same 150, file-level | 94.0% | 90.7% | 0.93 | 0.15 | 12.3% | 24.4% |
 | 17 failed CI runs on main | 70.6% | 64.7% | 0.68 | 0.07 | 38.5% | 42.2% |
-| The same, without 4 runs where only a flaky system test failed | 12 of 13 | 11 of 13 | 0.88 | 0.10 | 50.2% | 55.1% |
+| The same, without 4 runs where only a flaky system test failed | 92.3% (12 of 13) | 84.6% (11 of 13) | 0.88 | 0.10 | 50.2% | 55.1% |
 
 How to read them:
 
-- Six of the 13 real CI breaks changed `Gemfile.lock`, `ci.yml`-tested config or `test_helper.rb`,
-  so the rule selected the whole suite. That is correct but costly. On the other seven, the
-  selection was 7.5% of the suite.
+- Six of the 13 real CI breaks changed `Gemfile.lock`, `test_helper.rb` or boot configuration,
+  so the rules selected the whole suite. That is correct but costly, and it is why the share
+  selected rises to 50% once the flaky runs are left out. On the other seven, the selection was
+  7.5% of the suite.
 - The one real break missed: a `config/piou.yml` change that failed
   `test/services/sandbox_container_test.rb`, which reads the setting through the app and never
   names the file.
@@ -181,7 +185,7 @@ How to read them:
 
 Nothing did most of this for Minitest, offline, when this gem was written (September 2026):
 
-| Project | What it is | What we took |
+| Project | What it is | What this gem took |
 |---|---|---|
 | [Crystalball](https://github.com/toptal/crystalball) (and GitLab's fork) | Coverage-map test selection for RSpec | The shape: record per-test coverage, predict from the diff; views, locales and schema as separate strategies |
 | [affected_tests](https://rubygems.org/gems/affected_tests), [test_impact](https://rubygems.org/gems/test_impact) | 2026 map-based selectors, RSpec only | `Coverage.result(clear: true)` per test; exit code for "run everything"; a staleness warning |
