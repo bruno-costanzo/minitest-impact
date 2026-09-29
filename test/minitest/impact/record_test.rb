@@ -54,6 +54,19 @@ class RecordTest < Minitest::Test
     assert_equal "test/sub_test.rb\n", paths.string
   end
 
+  def test_a_project_under_a_tmp_directory_is_still_recorded
+    recorder = Minitest::Impact::Recorder
+    root = recorder.instance_variable_get(:@root)
+    recorder.instance_variable_set(:@root, "/tmp/build/app")
+
+    assert recorder.project_file?("/tmp/build/app/lib/calc.rb")
+    refute recorder.project_file?("/tmp/build/app/tmp/cache/x.rb")
+    refute recorder.project_file?("/tmp/build/app/vendor/bundle/gem.rb")
+    refute recorder.project_file?("/tmp/build/other/lib/calc.rb")
+  ensure
+    recorder.instance_variable_set(:@root, root)
+  end
+
   def test_record_without_a_command_or_tests_fails
     err = StringIO.new
     assert_equal 1, Dir.chdir(sandbox.root) { Minitest::Impact::CLI.start(["record"], out: StringIO.new, err: err) }

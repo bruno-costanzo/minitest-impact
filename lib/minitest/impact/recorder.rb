@@ -43,9 +43,11 @@ module Minitest
           write(test: relative(test_file), name: name, seconds: seconds.round(4), lines: lines)
         end
 
+        # Judged on the path inside the project: a project that itself lives under a `tmp`
+        # directory (Linux's temporary directories, some CI workspaces) must still be recorded.
         def project_file?(path)
           path.start_with?("#{root}/") &&
-            !path.include?("/vendor/") && !path.include?("/tmp/") && !path.include?("/node_modules/")
+            !"/#{relative(path)}".match?(%r{/(vendor|tmp|node_modules)/})
         end
 
         def relative(path) = path.delete_prefix("#{root}/")
