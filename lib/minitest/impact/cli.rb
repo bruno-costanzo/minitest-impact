@@ -67,12 +67,10 @@ module Minitest
 
         repo = Repo.new
         Dir.mktmpdir("minitest-impact") do |dir|
-          lib = File.expand_path("../..", __dir__)
-          bootstrap = File.join(__dir__, "record_bootstrap.rb")
           env = {
             "MINITEST_IMPACT_RECORD" => dir,
             "MINITEST_IMPACT_ROOT" => repo.root,
-            "RUBYOPT" => ["-I#{lib}", "-r#{bootstrap}", @env["RUBYOPT"]].compact.join(" ")
+            "RUBYOPT" => rubyopt("record_bootstrap.rb")
           }
           ok = system(env, *argv)
           map = Map.merge(File.join(dir, Recorder::PARTS), commit: repo.head)
@@ -137,7 +135,12 @@ module Minitest
         return 0 if result.tests.empty?
 
         runner = File.exist?("bin/rails") ? ["bin/rails", "test"] : ["ruby", "-Itest", "-e", "ARGV.each { |f| require File.expand_path(f) }"]
-        system(*runner, *result.tests) ? 0 : 1
+        system({ "RUBYOPT" => rubyopt("partial_bootstrap.rb") }, *runner, *result.tests) ? 0 : 1
+      end
+
+      # Loads +bootstrap+ into every Ruby process the command starts, before the application.
+      def rubyopt(bootstrap)
+        ["-I#{File.expand_path("../..", __dir__)}", "-r#{File.join(__dir__, bootstrap)}", @env["RUBYOPT"]].compact.join(" ")
       end
 
       def print_text(result)

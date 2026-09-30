@@ -51,6 +51,25 @@ class CLITest < Minitest::Test
     assert_equal 0, cli("run").first
   end
 
+  # A minimum-coverage check measured on a handful of tests always fails, and would read as a red run.
+  def test_run_switches_simplecov_off_for_the_partial_run
+    sandbox.write("test/a_test.rb", <<~RUBY)
+      module SimpleCov
+        def self.start(*) = at_exit { exit!(2) }
+      end
+      SimpleCov.start
+      require "minitest/autorun"
+      class ATest < Minitest::Test
+        def test_a = assert(true)
+      end
+    RUBY
+    base = sandbox.commit("simplecov")
+    map_with(base, "test/a_test.rb" => { "lib/a.rb" => [3] }).save(File.join(sandbox.root, Minitest::Impact::Map::DEFAULT_PATH))
+    File.write(File.join(sandbox.root, "lib/a.rb"), "class A\n  def x\n    2\n  end\nend\n")
+
+    assert_equal 0, cli("run").first
+  end
+
   def test_eval_measures_recall_on_co_changed_commits
     File.write(File.join(sandbox.root, "lib/a.rb"), "class A\n  def x\n    2\n  end\nend\n")
     File.write(File.join(sandbox.root, "test/a_test.rb"), File.read(File.join(sandbox.root, "test/a_test.rb")) + "# more\n")

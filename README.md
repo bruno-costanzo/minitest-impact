@@ -88,7 +88,9 @@ $ bin/rails test:impact SINCE=main            # the same, as a Rake task (added 
 ```
 
 `--format paths` exits with status 10, and prints nothing, when the change needs the whole suite.
-`run` and `test:impact` run the whole suite themselves in that case. `--max N` keeps the N most
+`run` and `test:impact` run the whole suite themselves in that case, and switch SimpleCov off for
+the selected tests: a minimum-coverage check on a handful of tests always fails. With your own
+runner on `--format paths`, turn coverage off yourself. `--max N` keeps the N most
 likely files.
 
 ### For coding agents
