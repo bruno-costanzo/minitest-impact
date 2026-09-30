@@ -1,9 +1,10 @@
 # minitest-impact
 
-Pick the Minitest test files a change is most likely to break, or that were written to verify it,
-so a coding agent runs a handful of tests inside its loop instead of the whole suite. The full
-suite stays the final gate: this gem decides what to run *while working*, never what is allowed
-to ship.
+minitest-impact tells you which Minitest test files to run for a change.
+
+It is for coding agents. An agent that runs the whole suite after each edit wastes minutes. With
+this gem, the agent runs a small selection while it works. The whole suite still runs once, at
+the end, before anything ships.
 
 ```console
 $ minitest-impact select --since main
@@ -16,30 +17,24 @@ Confidence: medium
   ...
 ```
 
-It works in three layers; the third is optional:
+## How it works
 
-1. **A coverage map, exact and free.** One recording run of your suite notes which project lines
-   every test file executed (Ruby's `Coverage`, with `eval: true` so ERB views count too). Given a
-   diff, a changed line is traced to the method around it, the method is found by name in the
-   recorded version of the file (so moved lines still match), and the tests that ran that method
-   are selected. A change outside any method (a constant, a `validates`, a `has_many`) selects
-   every test that loaded the file, weighted down when the file is loaded by nearly everything.
-2. **Rules for what the map cannot see**, all in `lib/minitest/impact/rules.rb`: new files (the
-   conventional test path, and tests that mention the new constant), locale keys (tests that use
-   the key, views that render it), routes (their controllers), migrations and `schema.rb` (the
-   models of the changed tables), fixtures, Stimulus controllers (the views that use them), files a
-   test reads by path, files the application reads by path, folder or file name (prompts,
-   templates: the tests that ran the reading code), config keys the application reads by name, and
-   files that need the whole suite (`Gemfile.lock`, `test_helper.rb`, boot configuration).
-3. **Jev, optionally**, when the map and the rules are not enough: some file could not be traced,
-   or the selection is too large to run in a loop. See [Jev](#jev) below.
+1. **The map.** You run your suite once with the recorder. The recorder writes down which lines of
+   your app each test file runs. For a change, the gem finds the changed methods. Then it selects
+   the tests that ran those methods.
+2. **The rules.** Some changes are not in the map: a new file, a locale key, a route, a migration,
+   a fixture, a Stimulus controller, a file the app reads by path. Rules in
+   `lib/minitest/impact/rules.rb` find the tests for these changes. Some files need the whole suite,
+   for example `Gemfile.lock` and `test/test_helper.rb`.
+3. **Jev (optional).** Jev is a small, cheap model from TypeSafe. It puts the most likely tests
+   first. It does not remove tests. See [Jev](#jev).
 
-The output is an ordered list of test files, each with its reasons, and an overall confidence:
+Each selection has a confidence:
 
-- **high**: every changed file was traced exactly: a changed test, a changed method the map saw
-  run, or a file no test reads.
-- **medium**: some file was traced by the whole file or by convention.
-- **low**: some file could not be traced, or the change needs the whole suite. Run the suite.
+- **high**: the gem traced every changed file exactly.
+- **medium**: the gem traced some file by name or by convention only.
+- **low**: the gem could not trace some file, or the change needs the whole suite. Run the whole
+  suite.
 
 ## Install
 
@@ -50,7 +45,7 @@ group :development, :test do
 end
 ```
 
-Ruby 3.3 or newer (it uses the Prism parser from the standard library). No runtime dependencies.
+You need Ruby 3.3 or newer. The gem has no runtime dependencies.
 
 ## Record the map
 
@@ -59,244 +54,101 @@ $ minitest-impact record -- bin/rails test
 $ minitest-impact record -- sh -c 'bin/rails test; bin/rails test:system'
 ```
 
-`record` runs the command with `RUBYOPT` loading a small recorder before your app boots, so
-nothing changes in your test helper. Each test process (Rails' forked parallel workers included)
-appends one JSON line per test to its own file; when the command ends they are merged into
-`tmp/minitest-impact/map.json` (`--map PATH` to change it), stamped with the commit it describes.
+The map goes to `tmp/minitest-impact/map.json`. Use `--map PATH` to change it.
 
-- **SimpleCov is off while recording.** Ruby allows one coverage setup per process, so the
-  recorder makes `SimpleCov.start` do nothing for the run, with no change to your test helper.
-  Another tool that calls `Coverage.start` itself has to be turned off by you
-  (`ENV["MINITEST_IMPACT_RECORD"]` is set while recording).
-- **It does not need to be in your Gemfile.** The recorder loads no gem before your app's bundle
-  does, so the CLI can run from a checkout of this repository, outside the app's bundle:
+- Record from a clean working tree. The map keeps the commit it was recorded at.
+- Recording takes 2 to 3 times as long as a normal run.
+- Record again when the map gets old. A map that is some hundreds of commits old still works,
+  because the gem finds methods by name, not by line number.
+- SimpleCov is off while the recorder runs. Ruby allows one coverage setup per process. If
+  another tool calls `Coverage.start`, turn it off when `MINITEST_IMPACT_RECORD` is set.
+- You do not have to add the gem to the app's Gemfile. You can run it from a checkout:
   `ruby -I path/to/minitest-impact/lib path/to/minitest-impact/exe/minitest-impact record -- bin/rails test`.
-- Recording is 2 to 3 times slower than a normal run on a Rails app, because every test reads
-  and clears the coverage counters. Record on a quiet machine, or in CI, and refresh the map
-  when it drifts: a map a few hundred commits old still works, because methods are matched by name.
-- Record from a clean working tree; the map is stamped with `HEAD`.
 
 ## Select and run
 
 ```console
 $ minitest-impact select                      # the uncommitted change
-$ minitest-impact select --since main         # everything since main
+$ minitest-impact select --since main         # all changes since main
 $ minitest-impact select --since main --format json
 $ bin/rails test $(minitest-impact select --since main --format paths)
-$ minitest-impact run --since main            # select, then bin/rails test the selection
-$ bin/rails test:impact SINCE=main            # the same, as a Rake task (added by a Railtie)
+$ minitest-impact run --since main            # select, then run the selection
+$ bin/rails test:impact SINCE=main            # the same, as a Rake task
 ```
 
-When the change needs the whole suite, `select --format paths` prints nothing and `run` runs
-nothing, and both exit with status 10; `test:impact` runs the whole suite in that case. `run` and
-`test:impact` switch SimpleCov off for the selected tests, since a minimum-coverage check on a
-handful of tests always fails; with your own runner on `--format paths`, turn coverage off
-yourself. `--max N` keeps the N most likely files.
+- `--max N` keeps the N most likely test files.
+- When the change needs the whole suite, `select --format paths` prints nothing and exits with
+  status 10. `run` also exits with status 10. `test:impact` runs the whole suite.
+- `run` and `test:impact` turn SimpleCov off, because a coverage minimum always fails on a few
+  tests. If you use `--format paths` with your own runner, turn coverage off yourself.
 
-### For coding agents
+## For coding agents
 
-Put this in the agent's instructions (`CLAUDE.md`, `AGENTS.md`):
+Add this to the agent's instructions (`CLAUDE.md`, `AGENTS.md`):
 
-> While you work, run `bin/rails test:impact SINCE=main` instead of the whole suite. Do not run
-> the whole suite yourself: it runs after you finish.
+> While you work, run `bin/rails test:impact SINCE=main`. Do not run the whole suite. It runs
+> after you finish.
 
-Then make that true in your harness: run the full suite as code once the agent says it is done,
-and feed back only the failures. On "Confidence: low", `test:impact` already runs the whole suite.
+Then make your harness do it: when the agent is done, run the whole suite and give the agent only
+the failures.
 
 ## Jev
 
-[Jev](https://docs.typesafe.ai) is TypeSafe's fast, cheap classifier: it answers typed questions
-(yes/no, choice, score) about a state, with calibrated probabilities.
+Set `TYPESAFE_API_KEY` to use [Jev](https://docs.typesafe.ai). Without a key, or with `--no-jev`,
+the gem works offline with the map and the rules.
 
-Measured on one app so far (see [the numbers](#with-jev-2026-09-30)): it puts the test written for
-the change first far more often, and it never found a test the map and the rules had missed. It is
-used as a ranker, not a filter.
+- Jev gets the change and up to 48 candidate test files in one request.
+- Jev changes the order of the tests. It can add a test. It never removes a test.
+- If Jev fails, the gem uses the selection from the map and reports the error.
+- A request costs about $0.0004.
+- The model version is pinned (`jev-1.13.0`). The thresholds are in
+  `lib/minitest/impact/jev/questions.rb`. Tune them on your own history before you trust them
+  ([EVALUATION.md](EVALUATION.md#tuning-jev)).
 
-- Rules stay in code. Jev never decides what a test file is, which files need the whole suite,
-  or anything else a path can tell.
-- One request per selection, one narrow question per judgment. The state is the change (paths, a
-  trimmed diff, your `--intent`) and up to 48 candidate test files with their test names. The
-  questions: one yes/no per candidate ("do these tests call, render or assert on something the
-  change modifies?"), one choice of the candidate most directly written for the change, with a
-  "none" option, and one yes/no for "does every test depend on this?".
-- The candidates come from a fast search, and Jev only re-ranks them: the map's selection plus
-  test files whose paths and test names share words with the change.
-- Jev never drops a test. It can add tests and reorder them. Letting it drop weak picks lost tests
-  the change needed (7 in 158 cases) and bought little.
-- The thresholds live in one file (`lib/minitest/impact/jev/questions.rb`) and the model version
-  is pinned (`jev-1.13.0`), because a threshold tuned on one version does not carry over.
+On one app, Jev put the test written for the change first in 61% of cases, against 39% without
+it. It did not find a test that the map and the rules missed.
 
-Set `TYPESAFE_API_KEY` to turn it on (`TYPESAFE_BASE_URL` for another endpoint,
-`MINITEST_IMPACT_JEV_MODEL` to move the pin). Without a key, or with `--no-jev`, everything runs
-offline on the map and the rules. If Jev fails, the map's selection is used and the error is
-reported; the agent's loop never breaks on it.
+## Does it work?
 
-Cost: Jev bills input tokens only, $0.042 per million (docs.typesafe.ai/models). A request with
-48 candidates and a 12,000-character diff is under 10,000 tokens: about $0.0004.
+We measured it on the history of two Rails apps. The full numbers and the method are in
+[EVALUATION.md](EVALUATION.md). The main result, against the simplest strategy an agent can use
+without a map ("run the test with the same name as each changed file, and the tests that name the
+changed class"):
 
-### Tuning
+| | minitest-impact | Simple strategy |
+|---|---:|---:|
+| Piou Piou, 150 commits: all tests written for the change selected | 91% | 66% |
+| Fizzy, 200 commits: all tests written for the change selected | 94% | 61% |
+| Piou Piou, 13 real CI failures: failure found | 12 | 8 |
 
-The thresholds ship **untuned** (0.5 to keep a candidate, 0.5 confidence for the "most direct"
-choice, 0.8 for "whole suite"). Tune them on your own history before trusting them:
+The gem selects more tests than the simple strategy. On these commits it ran 21% to 24% of the
+suite time. The simple strategy ran 7% to 12%.
+
+To measure it on your own app:
 
 ```console
-$ minitest-impact eval --cases cases.json --jev --format json
-```
-
-and move the constants in `questions.rb` to the values that give the recall you need at the
-smallest selection.
-
-## Measure it on your history
-
-```console
-$ minitest-impact eval --co-changed 200          # commits that changed code and its tests together
-$ ruby eval/ci_failures.rb --repo . --out cases.json   # failed CI runs, via the gh CLI
+$ minitest-impact eval --co-changed 200
+$ ruby eval/ci_failures.rb --repo . --out cases.json
 $ minitest-impact eval --cases cases.json
+$ ruby -Ilib eval/baselines.rb --repo . --map map.json --results eval.json
 ```
-
-Two kinds of labelled cases:
-
-- **Tests a change broke** (`eval/ci_failures.rb`): for each failed GitHub Actions run on the
-  default branch, the change since the last green run, and the test files the failed jobs
-  reported. A test already failing in the run before is not counted again.
-- **Tests written for a change** (`--co-changed N`): commits that changed code and existing test
-  files together. The selector sees only the code; the tests the commit edited are the answer.
-
-Reported per case and on average: whether any expected test was selected (`caught`), whether all
-were (`all_caught`), recall, precision, and the share of the suite selected.
-
-### First numbers: one Rails app, map only (2026-09-28)
-
-Measured on Piou Piou, a Rails 8.1 app, with the map recorded at one commit: 396 test files (2,673
-unit and 88 system tests), 580 KB of JSON (72 KB gzipped). The evaluation made no Jev calls.
-
-| Cases | Caught (any expected test selected) | All caught | Recall | Precision | Share of suite selected | Share of suite time |
-|---|---:|---:|---:|---:|---:|---:|
-| 150 commits that changed code and tests together, method-level | 94.0% | 90.7% | 0.93 | 0.17 | 12.1% | 24.0% |
-| The same 150, file-level | 94.0% | 90.7% | 0.93 | 0.15 | 12.3% | 24.4% |
-| 17 failed CI runs on main | 70.6% | 64.7% | 0.68 | 0.07 | 38.5% | 42.2% |
-| The same, without 4 runs where only a flaky system test failed | 92.3% (12 of 13) | 84.6% (11 of 13) | 0.88 | 0.10 | 50.2% | 55.1% |
-
-How to read them:
-
-- Six of the 13 real CI breaks changed `Gemfile.lock`, `test_helper.rb` or boot configuration,
-  so the rules selected the whole suite. That is correct but costly, and it is why the share
-  selected rises to 50% once the flaky runs are left out. On the other seven, the selection was
-  7.5% of the suite.
-- The one real break missed: a `config/piou.yml` change that failed
-  `test/services/sandbox_container_test.rb`, which reads the setting through the app and never
-  names the file.
-- Method-level tracing barely beats file-level on this history. Most changes land in small,
-  focused files, where the two agree.
-
-### With Jev (2026-09-30)
-
-The same app two days later, with a map recorded at one commit (371 test files), the rules for
-files and config keys the application reads, and Jev as a ranker. "First" and "in the top 5" count
-the cases where an expected test was ranked there; `--format json` lists `selected` in rank order.
-
-| 150 commits that changed code and tests together | Caught | All caught | Recall | First | In the top 5 | Share of suite selected | Share of suite time |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Map and the older rules | 95.3% | 91.3% | 0.94 | 39% | 79% | 11.3% | 19.5% |
-| Map and the older rules, Jev allowed to drop picks | 94.0% | 88.0% | 0.92 | 55% | 82% | 9.4% | 16.5% |
-| Map and the current rules | 97.3% | 95.3% | 0.97 | 39% | 81% | 13.0% | 21.8% |
-| Map, the current rules and Jev as a ranker | 97.3% | 95.3% | 0.97 | 61% | 85% | 13.0% | 21.9% |
-
-How to read them:
-
-- The rules for what the application reads recovered 6 of the 15 tests the older rules missed,
-  all of them prompts and templates read through a service. They also select 18% more files.
-- Jev's gain is the order. An agent running `--max 5` gets the test written for its change in 85%
-  of cases, against 81% without it.
-- Of the 9 tests still missed, 3 belong to a commit that added a config key and its tests, with no
-  application code reading it yet: nothing but those tests could have pointed at them. Two are
-  architecture tests that read the whole source tree. The rest follow a seeds change, an importmap
-  change, a one-word config key (`technical`, too common to search for), and one change spread
-  over an agent, two jobs and a model.
-- Jev answered in about 4.7 seconds per selection, one request each.
-- Only 8 failed CI runs fit the newer map, too few to report.
-
-### A second app: Fizzy (2026-09-30)
-
-[Fizzy](https://github.com/basecamp/fizzy), Basecamp's open-source Rails app, with the map
-recorded at `a703bf1de` (2026-09-29): 261 test files (1,703 unit tests; the system tests were not
-recorded), 686 KB of JSON (62 KB gzipped), on SQLite in a Docker container. Recording took 44
-seconds against 39 for a plain run. The evaluation made no Jev calls.
-
-| Cases | Caught | All caught | Recall | Precision | Share of suite selected | Share of suite time |
-|---|---:|---:|---:|---:|---:|---:|
-| 200 commits that changed code and tests together (December 2025 to September 2026), method-level | 95.5% | 93.5% | 0.95 | 0.30 | 13.1% | 20.7% |
-
-How to read them:
-
-- 6 cases changed a file that needs the whole suite. 43 ended with "Confidence: low"; an agent
-  that runs the suite on those, as `test:impact` does, gets 95.5% all caught at 35% of suite time.
-- 13 cases missed a test. 5 of them selected nothing: a new Action Text patch in `lib/rails_ext`,
-  a service worker view, a SQLite search adapter that no longer exists at the map's commit, a
-  partial changed with the SaaS lockfile, and a commit whose only code change was
-  `test/test_helper.rb`, which the evaluation hides from the selector along with the tests. A
-  `config/routes.rb` change selected its controllers but not `test/routes_test.rb`.
-- No failed CI runs could be used. GitHub keeps Actions logs for 90 days; the 15 failed runs on
-  `main` whose logs were still there failed installing packages or gems, or on a flaky system
-  test in the SaaS bundle. None reported a failing unit test.
-
-### Against simpler strategies
-
-`eval/baselines.rb` replays the same cases with two strategies a coding agent can follow with
-no map: **conventional**, the changed tests plus the test named after each changed file
-(`app/models/invoice.rb` to `test/models/invoice_test.rb`), and **mentions**, the tests that name
-the constant a changed file defines. Both keep the gem's whole-suite rule, which needs no map.
-
-```console
-$ ruby -Ilib eval/baselines.rb --repo ../app --map map.json --results eval.json [--cases cases.json]
-```
-
-| Cases | Strategy | Caught | All caught | Recall | Precision | Share of suite selected | Share of suite time |
-|---|---|---:|---:|---:|---:|---:|---:|
-| Piou Piou, 150 commits | minitest-impact | 94.0% | 90.7% | 0.93 | 0.17 | 12.1% | 24.0% |
-| | conventional | 78.0% | 50.7% | 0.66 | 0.53 | 2.8% | 4.0% |
-| | mentions | 78.0% | 62.0% | 0.72 | 0.18 | 6.4% | 12.4% |
-| | both | 81.3% | 66.0% | 0.76 | 0.21 | 6.4% | 12.4% |
-| Piou Piou, 17 failed CI runs | minitest-impact | 70.6% | 64.7% | 0.68 | 0.07 | 38.5% | 42.2% |
-| | conventional, mentions or both | 47.1% | 47.1% | 0.47 | 0.02 | 36.3% | 37.3% |
-| Fizzy, 200 commits | minitest-impact | 95.5% | 93.5% | 0.95 | 0.30 | 13.1% | 20.7% |
-| | conventional | 68.5% | 50.0% | 0.60 | 0.54 | 3.6% | 4.4% |
-| | mentions | 68.5% | 54.0% | 0.62 | 0.40 | 5.1% | 6.3% |
-| | both | 75.5% | 61.0% | 0.69 | 0.46 | 5.2% | 6.6% |
-
-How to read them:
-
-- On commits, the map found every test a change needed in 25 (Piou Piou) and 32 (Fizzy) more
-  cases in 100 than the best simple strategy, at twice its test time on Piou Piou and three times
-  on Fizzy.
-- The simple strategies are more precise. When a change touches one model and its test, they
-  pick that test; the map also picks the controllers and jobs that ran the changed method.
-- Of the 13 real CI breaks on Piou Piou (the 4 other runs failed on a flaky system test), the map
-  caught 12 and every simple strategy 8, at about 40% of suite time for all: six of them needed
-  the whole suite.
-
-## Prior art
-
-Nothing did most of this for Minitest, offline, when this gem was written (September 2026):
-
-| Project | What it is | What this gem took |
-|---|---|---|
-| [Crystalball](https://github.com/toptal/crystalball) (and GitLab's fork) | Coverage-map test selection for RSpec | The shape: record per-test coverage, predict from the diff; views, locales and schema as separate strategies |
-| [affected_tests](https://rubygems.org/gems/affected_tests), [test_impact](https://rubygems.org/gems/test_impact) | 2026 map-based selectors, RSpec only | `Coverage.result(clear: true)` per test; exit code for "run everything"; a staleness warning |
-| [fast_cov](https://github.com/Gusto/fast_cov) | A C-extension file tracker that leaves `Coverage` to SimpleCov | A candidate recorder backend if recording beside SimpleCov matters more than line numbers |
-| [Datadog Test Impact Analysis](https://docs.datadoghq.com/tests/test_impact_analysis/) | Minitest support, but the decision needs Datadog's service | Nothing adopted |
-| [Launchable / CloudBees Smart Tests](https://docs.cloudbees.com/docs/cloudbees-smart-tests/latest/features/predictive-test-selection) | Predictive selection as a service | Nothing adopted |
-| Google TAP (Memon et al., 2017), Facebook's predictive test selection (Machalica et al., 2019), Ekstazi (Gligoric et al., 2015) | Research | File-level dynamic selection is safe and cheap; most failures are close to the change |
-| [`jev`](https://rubygems.org/gems/jev) 0.2.0 | A Ruby client for Jev | Not used yet: it always sends `jev-latest` to one fixed URL, and thresholds need a pinned version |
 
 ## Limits
 
-- Code that runs only at boot (initializers, `config/*.rb`) is not in the map; a change there is
-  traced by rules or reported as low confidence.
-- Views are traced by file, not by line: compiled templates' line numbers are not the ERB's.
-- Line coverage cannot see what a test *would* run after the change (a new branch, a new
-  callback). That is what the conventional test and Jev are for, and why the full suite stays the
-  final gate.
+- Code that runs only at boot (initializers, `config/*.rb`) is not in the map. Rules cover some
+  of it. For the rest, the confidence is low.
+- The gem traces views by file, not by line.
+- The map shows what tests ran before the change. It cannot show what a test will run after the
+  change, for example a new branch or a new callback. This is why the whole suite must still run
+  at the end.
+
+## Prior art
+
+Similar tools exist for RSpec ([Crystalball](https://github.com/toptal/crystalball),
+[affected_tests](https://rubygems.org/gems/affected_tests),
+[test_impact](https://rubygems.org/gems/test_impact)) and as hosted services (Datadog Test Impact
+Analysis, CloudBees Smart Tests). We did not find one for Minitest that works offline.
+[EVALUATION.md](EVALUATION.md#prior-art) says what we took from each.
 
 ## License
 

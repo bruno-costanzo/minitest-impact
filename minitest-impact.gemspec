@@ -17,7 +17,7 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.homepage = "https://github.com/bruno-costanzo/minitest-impact"
   spec.required_ruby_version = ">= 3.3"
-  spec.files = Dir["lib/**/*.rb", "exe/*", "eval/*.rb", "README.md", "CHANGELOG.md", "LICENSE.txt"]
+  spec.files = Dir["lib/**/*.rb", "exe/*", "eval/*.rb", "README.md", "EVALUATION.md", "CHANGELOG.md", "LICENSE.txt"]
   spec.bindir = "exe"
   spec.executables = ["minitest-impact"]
   spec.require_paths = ["lib"]
