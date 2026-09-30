@@ -216,6 +216,65 @@ How to read them:
 - Jev answered in about 4.7 seconds per selection, one request each.
 - Only 8 failed CI runs fit the newer map, too few to report.
 
+### A second app: Fizzy (2026-09-30)
+
+[Fizzy](https://github.com/basecamp/fizzy), Basecamp's open-source Rails app, with the map
+recorded at `a703bf1de` (2026-09-29): 261 test files (1,703 unit tests; the system tests were not
+recorded), 686 KB of JSON (62 KB gzipped), on SQLite in a Docker container. Recording took 44
+seconds against 39 for a plain run. The evaluation made no Jev calls.
+
+| Cases | Caught | All caught | Recall | Precision | Share of suite selected | Share of suite time |
+|---|---:|---:|---:|---:|---:|---:|
+| 200 commits that changed code and tests together (December 2025 to September 2026), method-level | 95.5% | 93.5% | 0.95 | 0.30 | 13.1% | 20.7% |
+
+How to read them:
+
+- 6 cases changed a file that needs the whole suite. 43 ended with "Confidence: low"; an agent
+  that runs the suite on those, as `test:impact` does, gets 95.5% all caught at 35% of suite time.
+- 13 cases missed a test. 5 of them selected nothing: a new Action Text patch in `lib/rails_ext`,
+  a service worker view, a SQLite search adapter that no longer exists at the map's commit, a
+  partial changed with the SaaS lockfile, and a commit whose only code change was
+  `test/test_helper.rb`, which the evaluation hides from the selector along with the tests. A
+  `config/routes.rb` change selected its controllers but not `test/routes_test.rb`.
+- No failed CI runs could be used. GitHub keeps Actions logs for 90 days; the 15 failed runs on
+  `main` whose logs were still there failed installing packages or gems, or on a flaky system
+  test in the SaaS bundle. None reported a failing unit test.
+
+### Against simpler strategies
+
+`eval/baselines.rb` replays the same cases with two strategies a coding agent can follow with
+no map: **conventional**, the changed tests plus the test named after each changed file
+(`app/models/invoice.rb` to `test/models/invoice_test.rb`), and **mentions**, the tests that name
+the constant a changed file defines. Both keep the gem's whole-suite rule, which needs no map.
+
+```console
+$ ruby -Ilib eval/baselines.rb --repo ../app --map map.json --results eval.json [--cases cases.json]
+```
+
+| Cases | Strategy | Caught | All caught | Recall | Precision | Share of suite selected | Share of suite time |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Piou Piou, 150 commits | minitest-impact | 94.0% | 90.7% | 0.93 | 0.17 | 12.1% | 24.0% |
+| | conventional | 78.0% | 50.7% | 0.66 | 0.53 | 2.8% | 4.0% |
+| | mentions | 78.0% | 62.0% | 0.72 | 0.18 | 6.4% | 12.4% |
+| | both | 81.3% | 66.0% | 0.76 | 0.21 | 6.4% | 12.4% |
+| Piou Piou, 17 failed CI runs | minitest-impact | 70.6% | 64.7% | 0.68 | 0.07 | 38.5% | 42.2% |
+| | conventional, mentions or both | 47.1% | 47.1% | 0.47 | 0.02 | 36.3% | 37.3% |
+| Fizzy, 200 commits | minitest-impact | 95.5% | 93.5% | 0.95 | 0.30 | 13.1% | 20.7% |
+| | conventional | 68.5% | 50.0% | 0.60 | 0.54 | 3.6% | 4.4% |
+| | mentions | 68.5% | 54.0% | 0.62 | 0.40 | 5.1% | 6.3% |
+| | both | 75.5% | 61.0% | 0.69 | 0.46 | 5.2% | 6.6% |
+
+How to read them:
+
+- On commits, the map found every test a change needed in 25 (Piou Piou) and 32 (Fizzy) more
+  cases in 100 than the best simple strategy, at twice its test time on Piou Piou and three times
+  on Fizzy.
+- The simple strategies are more precise. When a change touches one model and its test, they
+  pick that test; the map also picks the controllers and jobs that ran the changed method.
+- Of the 13 real CI breaks on Piou Piou (the 4 other runs failed on a flaky system test), the map
+  caught 12 and every simple strategy 8, at about 40% of suite time for all: six of them needed
+  the whole suite.
+
 ## Prior art
 
 Nothing did most of this for Minitest, offline, when this gem was written (September 2026):
