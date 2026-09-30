@@ -17,11 +17,11 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.homepage = "https://github.com/bruno-costanzo/minitest-impact"
   spec.required_ruby_version = ">= 3.3"
-  spec.files = Dir["lib/**/*.rb", "exe/*", "eval/*.rb", "README.md", "LICENSE.txt"]
+  spec.files = Dir["lib/**/*.rb", "exe/*", "eval/*.rb", "README.md", "CHANGELOG.md", "LICENSE.txt"]
   spec.bindir = "exe"
   spec.executables = ["minitest-impact"]
   spec.require_paths = ["lib"]
   spec.metadata["source_code_uri"] = spec.homepage
-  spec.metadata["changelog_uri"] = "#{spec.homepage}/releases"
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
   spec.metadata["rubygems_mfa_required"] = "true"
 end
