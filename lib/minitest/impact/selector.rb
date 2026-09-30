@@ -215,6 +215,8 @@ module Minitest
           resolved(change, found || reads.any? ? :convention : :unresolved)
         elsif Rules.ruby?(change.path) && Rules.constant_for(change.path)
           resolve_by_name(change, reads.any?)
+        elsif resolve_read_by_code(change)
+          resolved(change, :convention, "the code reads it")
         elsif reads.any?
           resolved(change, :exact, "tests read it by path")
         elsif Rules.quiet?(change.path)
@@ -280,6 +282,46 @@ module Minitest
           found = true if map_tests(file, :via_file, "reaches #{constant} through #{file}")
         end
         resolved(change, found ? :convention : :unresolved, constant)
+      end
+
+      # A file the map cannot see (a prompt, a template, a config file) that application code reads:
+      # by its path, by the folder it sits in, by its bare file name, or, for config, by the keys
+      # the change touched. The tests that ran that code are the ones that can notice.
+      def resolve_read_by_code(change)
+        path = change.path
+        found = false
+        readers = code_mentioning(path, change)
+        reason = "reads #{path}"
+        [[File.dirname(path), "reads files under #{File.dirname(path)}"], [File.basename(path), reason]].each do |needle, why|
+          break unless readers.empty?
+
+          candidates = code_mentioning(needle, change)
+          readers, reason = candidates, why if candidates.size <= Rules::MAX_READERS
+        end
+        readers.each { |file| found = true if map_tests(file, :via_file, "#{reason} through #{file}") }
+        found |= resolve_config_keys(change) if Rules::CONFIG_YAML.match?(path)
+        found
+      end
+
+      def resolve_config_keys(change)
+        keys = config_keys(@repo.read(change.path, @head), change.new_lines) |
+               config_keys(@repo.read(change.old_path || change.path, @base), change.old_lines)
+        found = false
+        keys.select { |key| Rules.distinctive_key?(key) }.each do |key|
+          code_mentioning(key, change).each do |file|
+            found = true if map_tests(file, :via_file, "reads #{key} from #{change.path} through #{file}")
+          end
+        end
+        found
+      end
+
+      def config_keys(text, lines)
+        rows = text.to_s.lines
+        lines.filter_map { |line| rows[line - 1]&.[](Rules::CONFIG_KEY, 1) }
+      end
+
+      def code_mentioning(needle, change)
+        @repo.grep(needle, paths: Rules::CODE_ROOTS, rev: @head) - [change.path]
       end
 
       def resolve_view_like(view, reason)

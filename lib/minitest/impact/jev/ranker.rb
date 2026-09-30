@@ -8,7 +8,9 @@ module Minitest
       # over test paths and test names builds a shortlist; Jev reads the change once and answers one
       # question per candidate, in one request (docs.typesafe.ai/cookbooks/rerank_typesafe).
       #
-      # Exact map hits are never dropped: the map saw those tests run the changed code.
+      # Jev only adds and reorders; it never drops a pick. Measured on Piou Piou's history, dropping
+      # lost tests the change needed and bought little, while the new order put the test written
+      # for the change first far more often.
       class Ranker
         EXACT = 0.9
 
@@ -96,8 +98,6 @@ module Minitest
               next if noul < Questions::KEEP
 
               by_test[test] = Pick.new(test: test, score: noul * 0.8, reasons: ["Jev: exercises the change (#{noul.round(2)})"], seconds: map.seconds(test))
-            elsif pick.score < EXACT && noul < Questions::KEEP
-              by_test.delete(test)
             else
               pick.score = pick.score >= EXACT ? pick.score : (pick.score + noul) / 2
               pick.reasons += ["Jev: #{noul.round(2)}"]

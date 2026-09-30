@@ -28,8 +28,9 @@ It works in three layers; the third is optional:
    conventional test path, and tests that mention the new constant), locale keys (tests that use
    the key, views that render it), routes (their controllers), migrations and `schema.rb` (the
    models of the changed tables), fixtures, Stimulus controllers (the views that use them), files a
-   test reads by path, and files that need the whole suite (`Gemfile.lock`, `test_helper.rb`, boot
-   configuration).
+   test reads by path, files the application reads by path, folder or file name (prompts,
+   templates: the tests that ran the reading code), config keys the application reads by name, and
+   files that need the whole suite (`Gemfile.lock`, `test_helper.rb`, boot configuration).
 3. **Jev, optionally**, when the map and the rules are not enough: some file could not be traced,
    or the selection is too large to run in a loop. See [Jev](#jev) below.
 
@@ -105,9 +106,9 @@ and feed back only the failures. On "Confidence: low", `test:impact` already run
 [Jev](https://docs.typesafe.ai) is TypeSafe's fast, cheap classifier: it answers typed questions
 (yes/no, choice, score) about a state, with calibrated probabilities.
 
-This layer is **not measured yet**: the numbers below were taken without it, and its thresholds
-ship untuned (see [Tuning](#tuning)). Treat it as experimental until you have measured it on your
-own history.
+Measured on one app so far (see [the numbers](#with-jev-2026-09-30)): it puts the test written for
+the change first far more often, and it never found a test the map and the rules had missed. It is
+used as a ranker, not a filter.
 
 - Rules stay in code. Jev never decides what a test file is, which files need the whole suite,
   or anything else a path can tell.
@@ -118,8 +119,8 @@ own history.
   "none" option, and one yes/no for "does every test depend on this?".
 - The candidates come from a fast search, and Jev only re-ranks them: the map's selection plus
   test files whose paths and test names share words with the change.
-- Exact map hits are never dropped. Jev can add tests, drop weak non-exact ones and reorder, but a
-  test the map saw run the changed method stays.
+- Jev never drops a test. It can add tests and reorder them. Letting it drop weak picks lost tests
+  the change needed (7 in 158 cases) and bought little.
 - The thresholds live in one file (`lib/minitest/impact/jev/questions.rb`) and the model version
   is pinned (`jev-1.13.0`), because a threshold tuned on one version does not carry over.
 
@@ -185,6 +186,33 @@ How to read them:
   names the file.
 - Method-level tracing barely beats file-level on this history. Most changes land in small,
   focused files, where the two agree.
+
+### With Jev (2026-09-30)
+
+The same app two days later, with a map recorded at one commit (371 test files), the rules for
+files and config keys the application reads, and Jev as a ranker. "First" and "in the top 5" count
+the cases where an expected test was ranked there; `--format json` lists `selected` in rank order.
+
+| 150 commits that changed code and tests together | Caught | All caught | Recall | First | In the top 5 | Share of suite selected | Share of suite time |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Map and the older rules | 95.3% | 91.3% | 0.94 | 39% | 79% | 11.3% | 19.5% |
+| Map and the older rules, Jev allowed to drop picks | 94.0% | 88.0% | 0.92 | 55% | 82% | 9.4% | 16.5% |
+| Map and the current rules | 97.3% | 95.3% | 0.97 | 39% | 81% | 13.0% | 21.8% |
+| Map, the current rules and Jev as a ranker | 97.3% | 95.3% | 0.97 | 61% | 85% | 13.0% | 21.9% |
+
+How to read them:
+
+- The rules for what the application reads recovered 6 of the 15 tests the older rules missed,
+  all of them prompts and templates read through a service. They also select 18% more files.
+- Jev's gain is the order. An agent running `--max 5` gets the test written for its change in 85%
+  of cases, against 81% without it.
+- Of the 9 tests still missed, 3 belong to a commit that added a config key and its tests, with no
+  application code reading it yet: nothing but those tests could have pointed at them. Two are
+  architecture tests that read the whole source tree. The rest follow a seeds change, an importmap
+  change, a one-word config key (`technical`, too common to search for), and one change spread
+  over an agent, two jobs and a model.
+- Jev answered in about 4.7 seconds per selection, one request each.
+- Only 8 failed CI runs fit the newer map, too few to report.
 
 ## Prior art
 

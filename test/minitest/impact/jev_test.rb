@@ -43,7 +43,7 @@ class JevTest < Minitest::Test
     assert_equal "jev-1.14.0", configured.model
   end
 
-  def test_ranker_keeps_exact_hits_drops_weak_ones_adds_new_ones_and_puts_the_most_direct_first
+  def test_ranker_keeps_every_pick_adds_new_ones_and_puts_the_most_direct_first
     sandbox.write("test/a_test.rb", "test \"invoice total\" do\nend\n")
     sandbox.write("test/b_test.rb", "test \"b\" do\nend\n")
     sandbox.write("test/invoice_pdf_test.rb", "test \"invoice pdf\" do\nend\n")
@@ -64,7 +64,7 @@ class JevTest < Minitest::Test
                                                   .call(picks: picks, changes: [change], intent: "pdf", repo: sandbox.repo, map: map, head: nil)
 
     assert_requested stub, times: 1
-    assert_equal ["test/invoice_pdf_test.rb", "test/a_test.rb"], ranked.map(&:test)
+    assert_equal ["test/invoice_pdf_test.rb", "test/a_test.rb", "test/b_test.rb"], ranked.map(&:test)
     assert_equal({ "model" => "jev-1.13.0", "input_tokens" => 120, "candidates" => 3, "whole_suite" => false }, report)
   end
 

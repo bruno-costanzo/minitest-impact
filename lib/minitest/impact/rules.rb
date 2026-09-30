@@ -25,6 +25,15 @@ module Minitest
       QUIET = [%r{\A(?:docs|tmp|log)/}, /\.md\z/, %r{\A\.github/}, /\ALICENSE/, /\.txt\z/, %r{\A\.claude/}, /\A\.gitignore\z/].freeze
 
       ROUTES = "config/routes.rb"
+      CONFIG_YAML = %r{\Aconfig/.+\.ya?ml\z}
+      CONFIG_KEY = /\A\s*([A-Za-z_][\w-]*):/
+
+      # Where application code lives, for files it reads by path and config keys it reads by name.
+      CODE_ROOTS = %w[app lib].freeze
+
+      # A folder or bare file name found in more code files than this is too common to say who reads
+      # the changed file.
+      MAX_READERS = 3
       LOCALE = %r{\Aconfig/locales/.+\.ya?ml\z}
       MIGRATION = %r{\Adb/(migrate/.+\.rb|schema\.rb|.+_schema\.rb)\z}
       VIEW = %r{\Aapp/views/(.+?)/(_?)([^/]+?)\.[^/]+\z}
@@ -52,6 +61,10 @@ module Minitest
       def whole_suite?(path) = WHOLE_SUITE.include?(path)
       def quiet?(path) = QUIET.any? { |pattern| pattern.match?(path) }
       def ruby?(path) = path.end_with?(".rb")
+
+      # A key named like `sandbox_ready_poll_seconds` is found in code by name; `model` or
+      # `technical` would match unrelated code everywhere.
+      def distinctive_key?(key) = key.include?("_") && key.size >= 8
 
       # app/models/billing/invoice.rb => test/models/billing/invoice_test.rb
       # lib/tasks/x.rb => test/lib/tasks/x_test.rb, test/tasks/x_test.rb
