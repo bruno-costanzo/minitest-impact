@@ -87,11 +87,11 @@ $ minitest-impact run --since main            # select, then bin/rails test the 
 $ bin/rails test:impact SINCE=main            # the same, as a Rake task (added by a Railtie)
 ```
 
-`--format paths` exits with status 10, and prints nothing, when the change needs the whole suite.
-`run` and `test:impact` run the whole suite themselves in that case, and switch SimpleCov off for
-the selected tests: a minimum-coverage check on a handful of tests always fails. With your own
-runner on `--format paths`, turn coverage off yourself. `--max N` keeps the N most
-likely files.
+When the change needs the whole suite, `select --format paths` prints nothing and `run` runs
+nothing, and both exit with status 10; `test:impact` runs the whole suite in that case. `run` and
+`test:impact` switch SimpleCov off for the selected tests, since a minimum-coverage check on a
+handful of tests always fails; with your own runner on `--format paths`, turn coverage off
+yourself. `--max N` keeps the N most likely files.
 
 ### For coding agents
 
